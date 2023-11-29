@@ -143,7 +143,6 @@ class TSPSolver:
         # stop timer
         end_time = time.time()
 
-        print("ROUTE FOUND" if found_route else "NO ROUTE FOUND")
         return {'cost': bssf.cost if found_route else math.inf, 'time': end_time - start_time,
                 'count': count, 'soln': bssf, 'max': None, 'total': None, 'pruned': None}
 
@@ -170,7 +169,8 @@ class TSPSolver:
         start_time = time.time()
 
         # initial bssf - run greedy for 2 seconds max
-        bssf = None # self.greedy(2 if time_allowance >= 2 else time_allowance)['soln'] # FIXME UNCOMMENT
+        # bssf = None # FIXME SWAP
+        bssf = self.greedy(2 if time_allowance >= 2 else time_allowance)['soln']
 
         # priority queue to track states
         q = PriorityQueue()
@@ -190,7 +190,10 @@ class TSPSolver:
                     # dist from row city to col city
                     initial_matrix[i, j] = cities[i].costTo(cities[j])
 
-        print(initial_matrix)
+        # # FIXME DELETEME
+        # ncities = 4 # DELETEME
+        # State.ncities = 4 # DELETEME
+        # initial_matrix = np.array([[np.inf,7,3,12],[3,np.inf,6,14],[5,8,np.inf,6],[9,3,5,np.inf]])
 
         # reduced-cost of initial_matrix
         # | ∞  4  0  8  |
@@ -208,29 +211,29 @@ class TSPSolver:
         initial_state = State(matrix=initial_matrix, lower_bound=State.initial_lower_bound,
                               route=[cities[0]], unvisited=unvisited, from_row=0)
         priority = initial_state.get_priority()
-        print("Got initial priority: ", str(priority))
 
         # add initial state to queue
         q.add_state(initial_state, priority)
 
         # expand states and check until (1) timeout or (2) all states are checked or pruned
-        while not q.is_empty():# and (time.time() - start_time) < time_allowance: # FIXME Uncomment timer
+        while not q.is_empty() and (time.time() - start_time) < time_allowance:
             # analyze a state
             state = q.eject_state()
 
             if bssf is None or state.lower_bound < bssf.cost:
                 # potentially contains better route
-                child_states = state.expand()
-                for child_state in child_states:
+                for child_state in state.expand():
                     if child_state.is_complete_route():
                         # route is complete
                         solution = TSPSolution(child_state.route)
-                        count += 1  # num solutions considered
-                        if bssf is None or solution.cost < bssf.cost:
-                            # route is better than previous BSSF
-                            bssf = solution
-                            q.prune(bssf.cost)
-                    elif bssf is None or child_state.lower_bound < bssf.cost:
+                        if solution.cost != np.inf:
+                            # infinite routes are not valid
+                            count += 1  # num solutions considered
+                            if bssf is None or solution.cost < bssf.cost:
+                                # route is better than previous BSSF
+                                bssf = solution
+                                q.prune(bssf.cost)
+                    elif bssf is None or (child_state.lower_bound < bssf.cost and child_state.lower_bound != np.inf):
                         # route not yet complete AND potentially better than BSSF
                         # add it to the queue to analyze later
                         q.add_state(child_state, child_state.get_priority())
@@ -260,7 +263,7 @@ class State:
     # NOTE - these must be set before calling helper methods
     ncities = None
     initial_lower_bound = None
-    num_states_generated = 0
+    num_states_generated = None
 
     def __init__(self, matrix: np.ndarray, lower_bound: float, route: list, unvisited: list, from_row: int):
         self.matrix = matrix
@@ -278,7 +281,7 @@ class State:
         """
         assert State.ncities is not None and State.initial_lower_bound
         PROGRESS_WEIGHT = 1
-        LOWER_BOUND_WEIGHT = 1  # possibly reduce to 0.8 to prioritize progress more
+        LOWER_BOUND_WEIGHT = 0.5
 
         # CITIES_IN_ROUTE / TOTAL_CITIES
         progress_priority = (len(self.route) / State.ncities) * PROGRESS_WEIGHT
@@ -312,11 +315,8 @@ class State:
                     i += 1
 
             # set (from_row, to_col) and (to_col, from_row) to infinity
-            # print("About to update new child matrix")
-            # print(self.matrix)
-            # print(f"self.from_row: {self.from_row}, to_col: {to_col}\n")
             child_matrix = self.matrix.copy()
-            child_matrix[self.from_row, to_col] = np.inf    # FIXME INDEX ERROR HERE
+            child_matrix[self.from_row, to_col] = np.inf
             child_matrix[to_col, self.from_row] = np.inf
 
             # slice matrix - to "set" row from_row and col to_col to infinity (delete them)
@@ -418,10 +418,6 @@ class PriorityQueue:
 
         :param bssf_cost: The cost of the best solution so far (BSSF), as a float
         """
-        print(f"bssf_cost: {bssf_cost}")
-        print("Heap BEFORE pruning: ")
-        print(self._heap)
-
         pruned_heap = []
 
         # create a new heap with kept items
@@ -438,11 +434,6 @@ class PriorityQueue:
         heapq.heapify(pruned_heap)                                  # ]- O(n)
 
         self._heap = pruned_heap
-
-        print(f"Pruned items: {deleteme}")
-        print("Heap AFTER pruning")
-        print(self._heap)
-        print()
 
     def is_empty(self):
         return len(self._heap) == 0
