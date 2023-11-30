@@ -18,14 +18,13 @@ from TSPClasses import *
 import heapq
 import itertools
 
-import warnings # TODO Deleteme
-
 
 class TSPSolver:
     def __init__(self, gui_view):
         self._scenario = None
         self.max_states = None
-        np.seterr(all='raise') # TODO Deleteme
+        # have numpy raise warnings as errors
+        np.seterr(all='raise')
 
     def setupWithScenario(self, scenario):
         self._scenario = scenario
@@ -156,23 +155,17 @@ class TSPSolver:
 	'''
 
     def branchAndBound(self, time_allowance=60.0):
+        # 1) INITIALIZATION
         cities = self._scenario.getCities()
         ncities = len(cities)
         self.max_states = 0
         count = 0
-
         # static variables for State
         State.ncities = ncities
         State.num_states_generated = 1  # initial state not created by expand function
 
         # start timer
         start_time = time.time()
-
-        # initial bssf - run greedy for 2 seconds max
-        bssf = self.greedy(2 if time_allowance >= 2 else time_allowance)['soln']
-
-        # priority queue to track states
-        q = PriorityQueue()
 
         # matrix for initial State
         # | ∞  7  3  12 |
@@ -189,13 +182,6 @@ class TSPSolver:
                     # dist from row city to col city
                     initial_matrix[i, j] = cities[i].costTo(cities[j])
 
-        # FIXME DELETEME
-        # ncities = 4 # DELETEME
-        # State.ncities = 4 # DELETEME
-        # initial_matrix = np.array([[np.inf,7,3,12],[3,np.inf,6,14],[5,8,np.inf,6],[9,3,5,np.inf]])
-
-        print(f"Initial matrix: {initial_matrix}")
-
         # reduced-cost of initial_matrix
         # | ∞  4  0  8  |
         # | 0  ∞  3  10 |
@@ -203,13 +189,12 @@ class TSPSolver:
         # | 6  0  2  ∞  |
         State.initial_lower_bound = State.reduce_cost(initial_matrix)
 
-        # initialize unvisited to include all cities except first (starting city)
+        # unvisited - include all cities except first (starting city)
         unvisited = [None] * (ncities - 1)
         city_to_index = {}
         for i in range(1, ncities):
             unvisited[i - 1] = cities[i]
             city_to_index[cities[i]] = i
-
         # cache indexes of each city
         State.city_to_index = city_to_index
 
@@ -218,23 +203,22 @@ class TSPSolver:
                               route=[cities[0]], unvisited=unvisited, from_row=0)
         priority = initial_state.get_priority()
 
-        # add initial state to queue
+        # priority queue to track states
+        q = PriorityQueue()
         q.add_state(initial_state, priority)
 
-        num_complete_routes = 0  # TODO DELETEME
-        num_states_incomplete_routes = 0    # TODO DELETEME
+        # initial bssf - run greedy for 2 seconds max
+        bssf = self.greedy(2 if time_allowance >= 2 else time_allowance)['soln']
 
-        # expand states and check until (1) timeout or (2) all states are checked or pruned
-        while not q.is_empty() and (time.time() - start_time) < time_allowance: # FIXME REVERT
+        # run algorithm until timeout or no states left
+        while not q.is_empty() and (time.time() - start_time) < time_allowance:
             # analyze a state
             state = q.eject_state()
 
-            # assert bssf is None # TODO DELETEME
             if bssf is None or state.lower_bound < bssf.cost:
                 # potentially contains better route
                 for child_state in state.expand():
                     if child_state.is_complete_route():
-                        num_complete_routes += 1    # TODO DELETEME
                         # route is complete
                         solution = TSPSolution(child_state.route)
                         if solution.cost != np.inf:
@@ -242,19 +226,12 @@ class TSPSolver:
                             count += 1  # num solutions considered
                             if bssf is None or solution.cost < bssf.cost:
                                 # route is better than previous BSSF
-                                print("NEW BSSF FOUND")
-                                bssf = solution # TODO REVERT
-                                q.prune(bssf.cost) # TODO REVERT
-                                # pass    # TODO REVERT
+                                bssf = solution
+                                q.prune(bssf.cost)
                     elif bssf is None or (child_state.lower_bound < bssf.cost and child_state.lower_bound != np.inf):
-                        num_states_incomplete_routes += 1  # TODO DELETEME
                         # route not yet complete AND potentially better than BSSF
                         # add it to the queue to analyze later
                         q.add_state(child_state, child_state.get_priority())
-
-        print(f"Total number of states added to the queue: {q.total_states_created}")
-        print(f"Total number of complete routes: {num_complete_routes}")
-        print(f"Total number of states w/incomplete routes: {num_states_incomplete_routes}")
 
         # stop timer
         end_time = time.time()
@@ -289,7 +266,7 @@ class State:
         self.lower_bound = lower_bound
         self.route = route
         self.unvisited = unvisited
-        self.from_row = from_row    # for np array slicing in expand()
+        self.from_row = from_row
 
     def get_priority(self) -> float:
         """
@@ -398,7 +375,6 @@ class PriorityQueue:
         self.max_states = 0
         self.num_states_pruned = 0
         self._heap = []
-        self.total_states_created = 0   # FIXME DELETEME (Only for debugging)
 
     def add_state(self, state: State, priority: float) -> None:
         """
@@ -411,8 +387,6 @@ class PriorityQueue:
         # NOTE - we use PriorityQueue.id as the second argument for tiebreakers
         heapq.heappush(self._heap, (-priority, PriorityQueue.id, state))       # ]- O(logn)
         PriorityQueue.id += 1
-
-        self.total_states_created += 1
 
         # update max_states
         self.max_states = max(self.max_states, len(self._heap))
@@ -435,14 +409,12 @@ class PriorityQueue:
 
         # create a new heap with kept items
         # NOTE - creating a new queue then running heapify() ensures O(n) time to prune
-        deleteme = 0    # FIXME deleteme
         for item in self._heap:
             if item[2].lower_bound < bssf_cost:
                 # keep the item
                 pruned_heap.append(item)
             else:
                 # prune the item
-                deleteme += 1
                 self.num_states_pruned += 1
         heapq.heapify(pruned_heap)                                  # ]- O(n)
 
