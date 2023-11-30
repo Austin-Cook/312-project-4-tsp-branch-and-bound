@@ -163,13 +163,12 @@ class TSPSolver:
 
         # static variables for State
         State.ncities = ncities
-        State.num_states_generated = 0
+        State.num_states_generated = 1  # initial state not created by expand function
 
         # start timer
         start_time = time.time()
 
         # initial bssf - run greedy for 2 seconds max
-        # bssf = None # FIXME SWAP
         bssf = self.greedy(2 if time_allowance >= 2 else time_allowance)['soln']
 
         # priority queue to track states
@@ -190,10 +189,12 @@ class TSPSolver:
                     # dist from row city to col city
                     initial_matrix[i, j] = cities[i].costTo(cities[j])
 
-        # # FIXME DELETEME
+        # FIXME DELETEME
         # ncities = 4 # DELETEME
         # State.ncities = 4 # DELETEME
         # initial_matrix = np.array([[np.inf,7,3,12],[3,np.inf,6,14],[5,8,np.inf,6],[9,3,5,np.inf]])
+
+        print(f"Initial matrix: {initial_matrix}")
 
         # reduced-cost of initial_matrix
         # | ∞  4  0  8  |
@@ -204,8 +205,13 @@ class TSPSolver:
 
         # initialize unvisited to include all cities except first (starting city)
         unvisited = [None] * (ncities - 1)
+        city_to_index = {}
         for i in range(1, ncities):
             unvisited[i - 1] = cities[i]
+            city_to_index[cities[i]] = i
+
+        # cache indexes of each city
+        State.city_to_index = city_to_index
 
         # create initial State
         initial_state = State(matrix=initial_matrix, lower_bound=State.initial_lower_bound,
@@ -215,15 +221,20 @@ class TSPSolver:
         # add initial state to queue
         q.add_state(initial_state, priority)
 
+        num_complete_routes = 0  # TODO DELETEME
+        num_states_incomplete_routes = 0    # TODO DELETEME
+
         # expand states and check until (1) timeout or (2) all states are checked or pruned
-        while not q.is_empty() and (time.time() - start_time) < time_allowance:
+        while not q.is_empty() and (time.time() - start_time) < time_allowance: # FIXME REVERT
             # analyze a state
             state = q.eject_state()
 
+            # assert bssf is None # TODO DELETEME
             if bssf is None or state.lower_bound < bssf.cost:
                 # potentially contains better route
                 for child_state in state.expand():
                     if child_state.is_complete_route():
+                        num_complete_routes += 1    # TODO DELETEME
                         # route is complete
                         solution = TSPSolution(child_state.route)
                         if solution.cost != np.inf:
@@ -231,12 +242,19 @@ class TSPSolver:
                             count += 1  # num solutions considered
                             if bssf is None or solution.cost < bssf.cost:
                                 # route is better than previous BSSF
-                                bssf = solution
-                                q.prune(bssf.cost)
+                                print("NEW BSSF FOUND")
+                                bssf = solution # TODO REVERT
+                                q.prune(bssf.cost) # TODO REVERT
+                                # pass    # TODO REVERT
                     elif bssf is None or (child_state.lower_bound < bssf.cost and child_state.lower_bound != np.inf):
+                        num_states_incomplete_routes += 1  # TODO DELETEME
                         # route not yet complete AND potentially better than BSSF
                         # add it to the queue to analyze later
                         q.add_state(child_state, child_state.get_priority())
+
+        print(f"Total number of states added to the queue: {q.total_states_created}")
+        print(f"Total number of complete routes: {num_complete_routes}")
+        print(f"Total number of states w/incomplete routes: {num_states_incomplete_routes}")
 
         # stop timer
         end_time = time.time()
@@ -264,6 +282,7 @@ class State:
     ncities = None
     initial_lower_bound = None
     num_states_generated = None
+    city_to_index = None
 
     def __init__(self, matrix: np.ndarray, lower_bound: float, route: list, unvisited: list, from_row: int):
         self.matrix = matrix
@@ -281,7 +300,7 @@ class State:
         """
         assert State.ncities is not None and State.initial_lower_bound
         PROGRESS_WEIGHT = 1
-        LOWER_BOUND_WEIGHT = 0.5
+        LOWER_BOUND_WEIGHT = 0  # 0.5 # FIXME REVERT
 
         # CITIES_IN_ROUTE / TOTAL_CITIES
         progress_priority = (len(self.route) / State.ncities) * PROGRESS_WEIGHT
@@ -294,56 +313,47 @@ class State:
     def expand(self):
         child_states = []
 
-        # possible child State for each unvisited city
-        to_col = 0
-        for next_stop in self.unvisited:
-            # to_col values for respective child states will be all columns in the matrix except that == to_col
-            # NOTE - look at generation of partial path state for understanding
-            if to_col == self.from_row:
-                to_col += 1
+        for dest in self.unvisited:
+            # to_col is the index of the destination
+            to_col = State.city_to_index[dest]
 
-            # add next_stop to child's route
+            # child's route
             child_route = self.route.copy()
-            child_route.append(next_stop)
+            child_route.append(dest)
 
-            # child's unvisited set to hold all cities except the one being visited
+            # child's unvisited to hold all except its new dest
             child_unvisited = [None] * (len(self.unvisited) - 1)
             i = 0
             for city in self.unvisited:
-                if city is not next_stop:
+                if city is not dest:
                     child_unvisited[i] = city
                     i += 1
 
-            # set (from_row, to_col) and (to_col, from_row) to infinity
+            # copy and inf out respective parts of matrix
             child_matrix = self.matrix.copy()
-            child_matrix[self.from_row, to_col] = np.inf
+            # set from_row to inf
+            child_matrix[self.from_row, :] = np.inf
+            # set to_col to inf
+            child_matrix[:, to_col] = np.inf
+            # set val at to_col, from_row to inf
             child_matrix[to_col, self.from_row] = np.inf
 
-            # slice matrix - to "set" row from_row and col to_col to infinity (delete them)
-            child_matrix = np.delete(child_matrix, self.from_row, axis=0)
-            child_matrix = np.delete(child_matrix, to_col, axis=1)
+            # CHILD LOWER BOUND VALUE
+            # 1) parent lower bound
+            # 2) reduce cost matrix
+            cost_to_reduce = State.reduce_cost(child_matrix)
+            # 3) parent matrix at from_row, to_col
+            parent_val = self.matrix.item(self.from_row, to_col)
+            child_lower_bound = self.lower_bound + cost_to_reduce + parent_val
 
-            # reduce cost of the child  matrix
-            cost = self.reduce_cost(child_matrix)
-
-            # compute lower_bound (PREV_LOWER_BOUND + PARENT_MATRIX[FROM_ROW, TO_COL] + COST_TO_REDUCE_CHILD)
-            child_lower_bound = self.lower_bound + self.matrix.item(self.from_row, to_col) + cost
-
-            # compute child's from_row
+            # child's from_row
             child_from_row = to_col
-            if self.from_row < to_col:
-                # we deleted the child's row at from_row, so the index is offset
-                child_from_row -= 1
 
             # add the child state to the list
             child_states.append(State(matrix=child_matrix, lower_bound=child_lower_bound, route=child_route,
                                       unvisited=child_unvisited, from_row=child_from_row))
 
-            # state generation complete
-            State.num_states_generated += 1
-
-            # increment for next child state
-            to_col += 1
+        State.num_states_generated += len(child_states)
 
         return child_states
 
@@ -388,6 +398,7 @@ class PriorityQueue:
         self.max_states = 0
         self.num_states_pruned = 0
         self._heap = []
+        self.total_states_created = 0   # FIXME DELETEME (Only for debugging)
 
     def add_state(self, state: State, priority: float) -> None:
         """
@@ -400,6 +411,8 @@ class PriorityQueue:
         # NOTE - we use PriorityQueue.id as the second argument for tiebreakers
         heapq.heappush(self._heap, (-priority, PriorityQueue.id, state))       # ]- O(logn)
         PriorityQueue.id += 1
+
+        self.total_states_created += 1
 
         # update max_states
         self.max_states = max(self.max_states, len(self._heap))
