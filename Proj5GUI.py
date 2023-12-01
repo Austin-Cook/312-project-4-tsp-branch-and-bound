@@ -64,7 +64,6 @@ class PointLineView( QWidget ):
 		else:
 			self.pointList[color] = point_list
 
-
 	def addEdge( self, startPt, endPt, label, edgeColor, labelColor=None, xoffset=0.0 ):
 		if not labelColor:
 			labelColor = edgeColor

@@ -167,27 +167,27 @@ class TSPSolver:
         # start timer
         start_time = time.time()
 
-        # matrix for initial State
+        # create matrix for root state
         # | ∞  7  3  12 |
         # | 3  ∞  6  14 |
         # | 5  8  ∞  6  |
         # | 9  3  5  ∞  |
-        initial_matrix = np.zeros((ncities, ncities))
+        root_matrix = np.zeros((ncities, ncities))
         for i in range(ncities):
             for j in range(ncities):
                 if i == j:
                     # diagonal of infinities
-                    initial_matrix[i, j] = np.inf
+                    root_matrix[i, j] = np.inf
                 else:
                     # dist from row city to col city
-                    initial_matrix[i, j] = cities[i].costTo(cities[j])
+                    root_matrix[i, j] = cities[i].costTo(cities[j])
 
-        # reduced-cost of initial_matrix
+        # create reduced-cost matrix of initial_matrix
         # | ∞  4  0  8  |
         # | 0  ∞  3  10 |
         # | 0  3  ∞  0  |
         # | 6  0  2  ∞  |
-        State.initial_lower_bound = State.reduce_cost(initial_matrix)
+        State.initial_lower_bound = State.reduce_cost(root_matrix)
 
         # unvisited - include all cities except first (starting city)
         unvisited = [None] * (ncities - 1)
@@ -199,7 +199,7 @@ class TSPSolver:
         State.city_to_index = city_to_index
 
         # create initial State
-        initial_state = State(matrix=initial_matrix, lower_bound=State.initial_lower_bound,
+        initial_state = State(matrix=root_matrix, lower_bound=State.initial_lower_bound,
                               route=[cities[0]], unvisited=unvisited, from_row=0)
         priority = initial_state.get_priority()
 
@@ -207,10 +207,10 @@ class TSPSolver:
         q = PriorityQueue()
         q.add_state(initial_state, priority)
 
-        # initial bssf - run greedy for 2 seconds max
+        # 2) INITIAL BSSF - run greedy for 2 seconds max
         bssf = self.greedy(2 if time_allowance >= 2 else time_allowance)['soln']
 
-        # run algorithm until timeout or no states left
+        # 3) RUN ALGORITHM until timeout or no states left
         while not q.is_empty() and (time.time() - start_time) < time_allowance:
             # analyze a state
             state = q.eject_state()
@@ -223,15 +223,18 @@ class TSPSolver:
                         solution = TSPSolution(child_state.route)
                         if solution.cost != np.inf:
                             # infinite routes are not valid
-                            count += 1  # num solutions considered
                             if bssf is None or solution.cost < bssf.cost:
                                 # route is better than previous BSSF
+                                count += 1
                                 bssf = solution
                                 q.prune(bssf.cost)
                     elif bssf is None or (child_state.lower_bound < bssf.cost and child_state.lower_bound != np.inf):
                         # route not yet complete AND potentially better than BSSF
                         # add it to the queue to analyze later
                         q.add_state(child_state, child_state.get_priority())
+                    else:
+                        # prune the state (don't put it on the q)
+                        q.num_states_pruned += 1
 
         # stop timer
         end_time = time.time()
@@ -277,7 +280,7 @@ class State:
         """
         assert State.ncities is not None and State.initial_lower_bound
         PROGRESS_WEIGHT = 1
-        LOWER_BOUND_WEIGHT = 0  # 0.5 # FIXME REVERT
+        LOWER_BOUND_WEIGHT = 0.5
 
         # CITIES_IN_ROUTE / TOTAL_CITIES
         progress_priority = (len(self.route) / State.ncities) * PROGRESS_WEIGHT
