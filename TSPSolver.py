@@ -227,7 +227,6 @@ class TSPSolver:
                                 # route is better than previous BSSF
                                 count += 1
                                 bssf = solution
-                                q.prune(bssf.cost)
                     elif bssf is None or (child_state.lower_bound < bssf.cost and child_state.lower_bound != np.inf):
                         # route not yet complete AND potentially better than BSSF
                         # add it to the queue to analyze later
@@ -235,6 +234,9 @@ class TSPSolver:
                     else:
                         # prune the state (don't put it on the q)
                         q.num_states_pruned += 1
+            else:
+                # prune the state (don't expand it)
+                q.num_states_pruned += 1
 
         # stop timer
         end_time = time.time()
@@ -381,10 +383,10 @@ class PriorityQueue:
 
     def add_state(self, state: State, priority: float) -> None:
         """
-        Adds another State to the stack
+        Adds another State to the PriorityQueue
 
         :param priority: The priority of the State to add, a float between 0 and 1
-        :param state: The State to add to the stack
+        :param state: The State to add to the PriorityQueue
         """
         # NOTE - negate priority to interpret as max heap
         # NOTE - we use PriorityQueue.id as the second argument for tiebreakers
@@ -396,32 +398,11 @@ class PriorityQueue:
 
     def eject_state(self) -> State:
         """
-        Retrieves the State at the top of the stack
+        Retrieves the State at the top of the PriorityQueue
 
-        :return: The State at the top of the stack
+        :return: The State at the top of the PriorityQueue
         """
         return heapq.heappop(self._heap)[2]                            # ]- O(logn)
-
-    def prune(self, bssf_cost: float) -> None:
-        """
-        Prunes the States in the priority queue to include only those better than the BSSF
-
-        :param bssf_cost: The cost of the best solution so far (BSSF), as a float
-        """
-        pruned_heap = []
-
-        # create a new heap with kept items
-        # NOTE - creating a new queue then running heapify() ensures O(n) time to prune
-        for item in self._heap:
-            if item[2].lower_bound < bssf_cost:
-                # keep the item
-                pruned_heap.append(item)
-            else:
-                # prune the item
-                self.num_states_pruned += 1
-        heapq.heapify(pruned_heap)                                  # ]- O(n)
-
-        self._heap = pruned_heap
 
     def is_empty(self):
         return len(self._heap) == 0
